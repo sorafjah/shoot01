@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canvas シューティングゲーム</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #000; /* 黒色の背景 */
+            font-family: 'Press Start 2P', cursive; /* ゲーム風フォント */
+            color: #fff; /* 白色テキスト */
+            overflow: hidden; /* スクロールバーを隠す */
+        }
+        canvas {
+            border: 2px solid #0f0; /* 緑色の境界線 */
+            background-color: #111; /* やや明るい黒のキャンバス背景 */
+            display: block;
+            max-width: 100%; /* キャンバスの最大幅 */
+            max-height: 80vh; /* キャンバスの最大高さ */
+            box-shadow: 0 0 20px #0f0; /* 緑色のグロー効果 */
+        }
+        #controls {
+            margin-top: 20px;
+            text-align: center;
+        }
+        button {
+            font-family: 'Press Start 2P', cursive;
+            padding: 10px 20px;
+            font-size: 16px;
+            color: #000;
+            background-color: #0f0; /* 緑色のボタン */
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            box-shadow: 0 0 10px #0f0;
+            transition: background-color 0.3s, box-shadow 0.3s;
+        }
+        button:hover {
+            background-color: #0c0; /* やや濃い緑色 */
+            box-shadow: 0 0 15px #0c0;
+        }
+        #scoreBoard {
+            font-size: 20px;
+            margin-bottom: 10px;
+        }
+        #messageBox {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: #0f0;
+            padding: 30px;
+            border-radius: 10px;
+            border: 2px solid #0f0;
+            text-align: center;
+            font-size: 24px;
+            z-index: 100; /* 他の要素より手前に表示 */
+            display: none; /* 初期状態では非表示 */
+            box-shadow: 0 0 20px #0f0;
+        }
+    </style>
+</head>
+<body>
+    <div id="scoreBoard">スコア: 0</div>
+    <canvas id="gameCanvas"></canvas>
+    <div id="controls">
+        <button id="startButton">スタート</button>
+        <button id="restartButton" style="display:none;">リスタート</button>
+    </div>
+    <div id="messageBox"></div>
+
+    <script>
+        // Canvas要素と2Dコンテキストの取得
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // UI要素の取得
+        const scoreBoard = document.getElementById('scoreBoard');
+        const startButton = document.getElementById('startButton');
+        const restartButton = document.getElementById('restartButton');
+        const messageBox = document.getElementById('messageBox');
+
+        // ゲーム設定
+        let score = 0;
+        let gameRunning = false;
+        let animationFrameId;
+
+        // キャンバスのサイズを親要素に合わせて調整
+        function resizeCanvas() {
+            const parent = canvas.parentElement;
+            const style = getComputedStyle(parent);
+            const parentWidth = parseInt(style.width, 10) - parseInt(style.paddingLeft, 10) - parseInt(style.paddingRight, 10);
+            const parentHeight = window.innerHeight * 0.7; // 画面の高さの70%程度
+
+            const aspectRatio = 16 / 9; // 例: 16:9 のアスペクト比
+            let newWidth = parentWidth;
+            let newHeight = parentWidth / aspectRatio;
+
+            if (newHeight > parentHeight) {
+                newHeight = parentHeight;
+                newWidth = parentHeight * aspectRatio;
+            }
+
+            canvas.width = newWidth > 800 ? 800 : newWidth; // 最大幅800px
+            canvas.height = newHeight > 450 ? 450 : newHeight; // 最大高さ450px
+
+            // サイズ変更時にゲーム要素も再配置（必要であれば）
+            if (gameRunning) {
+                // プレイヤーの位置などを調整するロジック
+            }
+        }
+
+
+        // プレイヤーオブジェクト
+        const player = {
+            x: 50,
+            y: canvas.height / 2 - 15, // 初期位置を中央に調整
+            width: 50,
+            height: 30,
+            color: '#0f0', // プレイヤーの色を緑に
+            speed: 7,
+            dx: 0, // X方向の移動量
+            dy: 0  // Y方向の移動量
+        };
+
+        // 弾丸の配列
+        const bullets = [];
+        const bulletSpeed = 10;
+        const bulletRadius = 5;
+        const bulletColor = '#ff0'; // 弾の色を黄色に
+
+        // 敵の配列
+        const enemies = [];
+        const enemySpeed = 2;
+        const enemySpawnInterval = 1500; // 敵が出現する間隔 (ミリ秒)
+        let lastEnemySpawnTime = 0;
+
+        // 爆発エフェクトの配列
+        const explosions = [];
+        const explosionColor = '#f00'; // 爆発の色を赤に
+
+        // キー入力状態
+        const keys = {
+            ArrowUp: false,
+            ArrowDown: false,
+            ArrowLeft: false,
+            ArrowRight: false,
+            Space: false
+        };
+
+        // --------------------描画関数--------------------
+
+        // プレイヤーを描画
+        function drawPlayer() {
+            ctx.fillStyle = player.color;
+            // 三角形の宇宙船を描画
+            ctx.beginPath();
+            ctx.moveTo(player.x, player.y - player.height / 2);
+            ctx.lineTo(player.x + player.width, player.y);
+            ctx.lineTo(player.x, player.y + player.height / 2);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // 弾丸を描画
+        function drawBullets() {
+            bullets.forEach(bullet => {
+                ctx.beginPath();
+                ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+                ctx.fillStyle = bullet.color;
+                ctx.fill();
+                ctx.closePath();
+            });
+        }
+
+        // 敵を描画
+        function drawEnemies() {
+            enemies.forEach(enemy => {
+                ctx.fillStyle = enemy.color;
+                ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+            });
+        }
+
+        // 爆発エフェクトを描画
+        function drawExplosions() {
+            explosions.forEach(explosion => {
+                ctx.fillStyle = explosion.color;
+                explosion.particles.forEach(particle => {
+                    ctx.beginPath();
+                    ctx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.closePath();
+                });
+            });
+        }
+
+        // --------------------更新関数--------------------
+
+        // プレイヤーの位置を更新
+        function updatePlayer() {
+            player.x += player.dx;
+            player.y += player.dy;
+
+            // 画面端での移動制限
+            if (player.x < 0) player.x = 0;
+            if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
+            if (player.y - player.height / 2 < 0) player.y = player.height / 2;
+            if (player.y + player.height / 2 > canvas.height) player.y = canvas.height - player.height / 2;
+        }
+
+        // 弾丸の位置を更新
+        function updateBullets() {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                bullet.x += bullet.speed;
+                // 画面外に出た弾丸を削除
+                if (bullet.x - bullet.radius > canvas.width) {
+                    bullets.splice(i, 1);
+                }
+            }
+        }
+
+        // 敵の位置を更新し、新しい敵を生成
+        function updateEnemies() {
+            const currentTime = Date.now();
+            if (currentTime - lastEnemySpawnTime > enemySpawnInterval && enemies.length < 10) { // 敵の最大数を10に制限
+                spawnEnemy();
+                lastEnemySpawnTime = currentTime;
+            }
+
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const enemy = enemies[i];
+                enemy.x -= enemy.speed;
+                // 画面外に出た敵を削除
+                if (enemy.x + enemy.width < 0) {
+                    enemies.splice(i, 1);
+                }
+            }
+        }
+
+        // 爆発エフェクトを更新
+        function updateExplosions() {
+            for (let i = explosions.length - 1; i >= 0; i--) {
+                const explosion = explosions[i];
+                explosion.particles.forEach(particle => {
+                    particle.x += particle.vx;
+                    particle.y += particle.vy;
+                    particle.life--;
+                });
+                // 寿命が尽きたパーティクルを削除
+                explosion.particles = explosion.particles.filter(p => p.life > 0);
+                // パーティクルがなくなったら爆発自体を削除
+                if (explosion.particles.length === 0) {
+                    explosions.splice(i, 1);
+                }
+            }
+        }
+
+
+        // --------------------ゲームロジック関数--------------------
+
+        // 敵を生成
+        function spawnEnemy() {
+            const size = Math.random() * 30 + 20; // 20から50のランダムなサイズ
+            const enemy = {
+                x: canvas.width,
+                y: Math.random() * (canvas.height - size),
+                width: size,
+                height: size,
+                color: `hsl(${Math.random() * 360}, 70%, 50%)`, // ランダムな色
+                speed: Math.random() * 2 + enemySpeed // 速度も少しランダムに
+            };
+            enemies.push(enemy);
+        }
+
+        // 弾を発射
+        function shoot() {
+            const bullet = {
+                x: player.x + player.width,
+                y: player.y,
+                radius: bulletRadius,
+                color: bulletColor,
+                speed: bulletSpeed
+            };
+            bullets.push(bullet);
+        }
+
+        // 衝突検知
+        function checkCollisions() {
+            // 弾丸と敵の衝突
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    const bullet = bullets[i];
+                    const enemy = enemies[j];
+
+                    if (bullet && enemy &&
+                        bullet.x - bullet.radius < enemy.x + enemy.width &&
+                        bullet.x + bullet.radius > enemy.x &&
+                        bullet.y - bullet.radius < enemy.y + enemy.height &&
+                        bullet.y + bullet.radius > enemy.y
+                    ) {
+                        createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
+                        enemies.splice(j, 1);
+                        bullets.splice(i, 1);
+                        score += 10;
+                        updateScoreBoard();
+                        break; // 1つの弾は1つの敵にしか当たらない
+                    }
+                }
+            }
+
+            // プレイヤーと敵の衝突
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const enemy = enemies[i];
+                // プレイヤーの当たり判定を少し小さくする（見た目と合わせる）
+                const playerHitbox = {
+                    x: player.x,
+                    y: player.y - player.height / 2,
+                    width: player.width * 0.8, // 横幅を少し狭める
+                    height: player.height * 0.8 // 高さを少し狭める
+                };
+                if (
+                    playerHitbox.x < enemy.x + enemy.width &&
+                    playerHitbox.x + playerHitbox.width > enemy.x &&
+                    playerHitbox.y < enemy.y + enemy.height &&
+                    playerHitbox.y + playerHitbox.height > enemy.y
+                ) {
+                    gameOver();
+                    return;
+                }
+            }
+        }
+
+        // 爆発エフェクトを生成
+        function createExplosion(x, y) {
+            const particleCount = 15;
+            const particles = [];
+            for (let i = 0; i < particleCount; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    radius: Math.random() * 3 + 1,
+                    color: explosionColor,
+                    vx: (Math.random() - 0.5) * 5, // X方向の速度
+                    vy: (Math.random() - 0.5) * 5, // Y方向の速度
+                    life: Math.random() * 30 + 20   // パーティクルの寿命
+                });
+            }
+            explosions.push({ particles });
+        }
+
+
+        // スコア表示を更新
+        function updateScoreBoard() {
+            scoreBoard.textContent = `スコア: ${score}`;
+        }
+
+        // メッセージを表示
+        function showMessage(text, duration = 0) {
+            messageBox.textContent = text;
+            messageBox.style.display = 'block';
+            if (duration > 0) {
+                setTimeout(() => {
+                    messageBox.style.display = 'none';
+                }, duration);
+            }
+        }
+
+        // ゲームオーバー処理
+        function gameOver() {
+            gameRunning = false;
+            cancelAnimationFrame(animationFrameId);
+            showMessage("ゲームオーバー！");
+            startButton.style.display = 'none';
+            restartButton.style.display = 'inline-block';
+        }
+
+        // ゲームをリセット
+        function resetGame() {
+            score = 0;
+            updateScoreBoard();
+            player.x = 50;
+            player.y = canvas.height / 2 - player.height / 2;
+            player.dx = 0;
+            player.dy = 0;
+            bullets.length = 0;
+            enemies.length = 0;
+            explosions.length = 0;
+            lastEnemySpawnTime = 0;
+            messageBox.style.display = 'none';
+            restartButton.style.display = 'none';
+            startButton.style.display = 'inline-block';
+            keys.Space = false; // スペースキーの状態もリセット
+        }
+
+        // --------------------イベントリスナー--------------------
+
+        // キーボード操作
+        function keyDownHandler(e) {
+            if (e.key === 'ArrowUp' || e.key === 'Up') keys.ArrowUp = true;
+            if (e.key === 'ArrowDown' || e.key === 'Down') keys.ArrowDown = true;
+            if (e.key === 'ArrowLeft' || e.key === 'Left') keys.ArrowLeft = true;
+            if (e.key === 'ArrowRight' || e.key === 'Right') keys.ArrowRight = true;
+            if (e.key === ' ' || e.key === 'Spacebar') { // スペースキー
+                e.preventDefault(); // デフォルトのスクロール動作を抑制
+                if (gameRunning && !keys.Space) { // 押しっぱなしで連射しないように
+                    shoot();
+                    keys.Space = true; // スペースキーが押されたことを記録
+                }
+            }
+        }
+
+        function keyUpHandler(e) {
+            if (e.key === 'ArrowUp' || e.key === 'Up') keys.ArrowUp = false;
+            if (e.key === 'ArrowDown' || e.key === 'Down') keys.ArrowDown = false;
+            if (e.key === 'ArrowLeft' || e.key === 'Left') keys.ArrowLeft = false;
+            if (e.key === 'ArrowRight' || e.key === 'Right') keys.ArrowRight = false;
+            if (e.key === ' ' || e.key === 'Spacebar') {
+                keys.Space = false; // スペースキーが離されたことを記録
+            }
+        }
+
+        // プレイヤーの移動方向を決定
+        function handlePlayerMovement() {
+            player.dx = 0;
+            player.dy = 0;
+            if (keys.ArrowUp) player.dy = -player.speed;
+            if (keys.ArrowDown) player.dy = player.speed;
+            if (keys.ArrowLeft) player.dx = -player.speed;
+            if (keys.ArrowRight) player.dx = player.speed;
+        }
+
+        // タッチ操作 (簡易的なもの)
+        let touchStartX = null;
+        let touchStartY = null;
+        const touchThreshold = 20; // タップとスワイプを区別する閾値
+
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (!gameRunning) return;
+            const touch = e.touches[0];
+            touchStartX = touch.clientX;
+            touchStartY = touch.clientY;
+            // タッチした瞬間に弾を発射
+            shoot();
+        }, { passive: false });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (!gameRunning || touchStartX === null) return;
+            const touch = e.touches[0];
+            const deltaX = touch.clientX - touchStartX;
+            const deltaY = touch.clientY - touchStartY;
+
+            // プレイヤーをタッチ位置に追従させる（相対移動）
+            // 感度調整が必要な場合がある
+            const sensitivity = 0.5;
+            player.x += deltaX * sensitivity;
+            player.y += deltaY * sensitivity;
+
+
+            touchStartX = touch.clientX;
+            touchStartY = touch.clientY;
+
+        }, { passive: false });
+
+        canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            touchStartX = null;
+            touchStartY = null;
+        }, { passive: false });
+
+
+        // スタートボタンの処理
+        startButton.addEventListener('click', () => {
+            if (!gameRunning) {
+                startGame();
+            }
+        });
+
+        // リスタートボタンの処理
+        restartButton.addEventListener('click', () => {
+            resetGame();
+            startGame();
+        });
+
+        // --------------------ゲームループ--------------------
+        function gameLoop() {
+            if (!gameRunning) return;
+
+            // 画面をクリア
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 更新処理
+            handlePlayerMovement(); // キー入力に基づく移動
+            updatePlayer();
+            updateBullets();
+            updateEnemies();
+            updateExplosions();
+            checkCollisions();
+
+            // 描画処理
+            drawPlayer();
+            drawBullets();
+            drawEnemies();
+            drawExplosions();
+
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        // ゲーム開始処理
+        function startGame() {
+            resetGame(); // ゲーム状態を初期化
+            gameRunning = true;
+            startButton.style.display = 'none';
+            restartButton.style.display = 'none';
+            messageBox.style.display = 'none';
+            lastEnemySpawnTime = Date.now(); // 敵の出現タイミングをリセット
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+            gameLoop();
+        }
+
+        // 初期化処理
+        function init() {
+            resizeCanvas(); // 初期表示時にキャンバスサイズを設定
+            window.addEventListener('resize', resizeCanvas); // ウィンドウリサイズ時にも調整
+            document.addEventListener('keydown', keyDownHandler);
+            document.addEventListener('keyup', keyUpHandler);
+            updateScoreBoard(); // 初期スコア表示
+            showMessage("「スタート」ボタンで開始", 3000);
+        }
+
+        // ゲームの初期化を実行
+        init();
+
+    </script>
+</body>
+</html>
+
