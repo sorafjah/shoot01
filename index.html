@@ -70,7 +70,15 @@
             display: none; /* 初期状態では非表示 */
             box-shadow: 0 0 20px #0f0;
         }
-    </style>
+    /* スマホ用レイアウト調整2 */
+@media (orientation:landscape) and (max-height:500px) {
+  #scoreBoard { font-size:15px; margin-bottom:4px; }
+  #controls { margin-top:8px; }
+  #controls button { padding:8px 22px; font-size:15px; min-height:40px; }
+  #messageBox { padding:14px 20px; font-size:18px; }
+}
+/* /スマホ用レイアウト調整2 */
+</style>
 </head>
 <body>
     <div id="scoreBoard">スコア: 0</div>
